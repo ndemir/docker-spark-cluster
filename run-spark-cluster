@@ -1,0 +1,39 @@
+#!/bin/bash
+
+function runCMD {
+	CMD=$1
+	CONTAINER_ID=$2
+	echo "$CMD" | docker attach $CONTAINER_ID
+}
+
+declare -a SLAVE_IP
+declare -a SLAVE_HOSTNAME
+SLAVE_IP=("172.17.0.11" "172.17.0.12")
+SLAVE_HOSTNAME=("slave1" "slave2")
+
+let l=${#SLAVE_IP[@]}-1
+for i in `seq 0 $l`; do
+	ip=${SLAVE_IP[$i]}
+	h=${SLAVE_HOSTNAME[$i]}
+	#each slave will use only one core
+	id=`docker run --lxc-conf="lxc.cgroup.cpuset.cpus=$i" -d -h $h --lxc-conf="lxc.network.ipv4 = $ip/16" -it spark`
+	runCMD "echo SPARK_LOCAL_IP=$ip >> /spark-1.2.1-bin-hadoop2.4/conf/spark-env.sh" $id
+done
+
+MASTER_IP="172.17.0.10"
+MASTER_HOSTNAME="master"
+MASTER_CONTAINER_ID=`docker run -d -h $MASTER_HOSTNAME --lxc-conf="lxc.network.ipv4 = $MASTER_IP/16" -it spark`
+runCMD "echo SPARK_MASTER_IP=$MASTER_IP >> /spark-1.2.1-bin-hadoop2.4/conf/spark-env.sh" $MASTER_CONTAINER_ID
+runCMD "echo SPARK_LOCAL_IP=$MASTER_IP >> /spark-1.2.1-bin-hadoop2.4/conf/spark-env.sh" $MASTER_CONTAINER_ID
+
+let l=${#SLAVE_IP[@]}-1
+for i in `seq 0 $l`; do
+  ip=${SLAVE_IP[$i]}
+  runCMD "echo $ip >> /spark-1.2.1-bin-hadoop2.4/conf/slaves" $MASTER_CONTAINER_ID
+done
+
+sleep 1
+runCMD "cd /spark*; ./sbin/start-all.sh" $MASTER_CONTAINER_ID
+sleep 1
+echo $MASTER_CONTAINER_ID
+
